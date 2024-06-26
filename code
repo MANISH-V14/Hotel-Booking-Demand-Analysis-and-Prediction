@@ -1,0 +1,206 @@
+# Load necessary libraries
+library(dplyr)
+library(randomForest)
+library(caret)
+library(ggplot2)
+
+# Load the dataset
+hotel_bookings <- read.csv("hotel_bookings.csv")
+
+# Dropping columns
+hotel_bookings <- hotel_bookings %>%
+  select(-company, -arrival_date_week_number)
+
+# Handling missing values
+# Display columns with missing values
+# Check for "NULL" values in each column
+print(colSums(hotel_bookings == "NULL"))
+
+# Replace "NULL" values with median for 'children' column
+hotel_bookings$children <- ifelse(hotel_bookings$children == "NULL", median(as.numeric(hotel_bookings$children), na.rm = TRUE), hotel_bookings$children)
+
+# Replace "NULL" values with median for 'agent' column
+hotel_bookings$agent <- ifelse(hotel_bookings$agent == "NULL", median(as.numeric(hotel_bookings$agent), na.rm = TRUE), hotel_bookings$agent)
+
+# Find the most frequent value in the 'country' column
+most_frequent_country <- names(sort(table(hotel_bookings$country), decreasing = TRUE))[1]
+
+# Replace "NULL" values with the most frequent value in the 'country' column
+hotel_bookings$country <- ifelse(hotel_bookings$country == "NULL", most_frequent_country, hotel_bookings$country)
+
+# Check for remaining missing values
+print(colSums(hotel_bookings == "NULL"))
+
+print(str(hotel_bookings))
+
+
+# Convert 'arrival_date_year' to character
+hotel_bookings$arrival_date_year <- as.character(hotel_bookings$arrival_date_year)
+
+# Checking for miswritings
+# Display unique values for selected columns
+selected_cols <- c("hotel", "arrival_date_month", "arrival_date_year", "country", "market_segment", "distribution_channel", "reserved_room_type", "assigned_room_type", "deposit_type", "customer_type", "reservation_status")
+unique_values <- lapply(hotel_bookings[selected_cols], unique)
+print(unique_values)
+
+# Check for logical errors
+logical_errors <- hotel_bookings %>%
+  filter(children == 0 & adults == 0 & babies == 0)
+
+# Display rows with logical errors
+print(logical_errors)
+. 
+# Drop rows with logical errors
+hotel_bookings <- hotel_bookings %>%
+  filter(!(children == 0 & adults == 0 & babies == 0)) %>%
+  arrange()
+
+# Reset index
+hotel_bookings <- hotel_bookings %>%
+  add_rownames("index")
+
+# Check the cleaned dataset
+print(str(hotel_bookings))
+
+# Combine and format as character with error handling
+hotel_bookings$arrival_date <- sapply(1:nrow(hotel_bookings), function(i) {
+  year <- hotel_bookings$arrival_date_year[i]
+  month <- match(hotel_bookings$arrival_date_month[i], month.name)
+  day <- hotel_bookings$arrival_date_day_of_month[i]
+  
+  # Check for missing values and return NA if any
+  if (any(is.na(c(year, month, day)))) {
+    return(NA)
+  }
+  
+  # Combine the values with the desired format
+  paste0(year, "-", sprintf("%02d", month), "-", sprintf("%02d", day))
+})
+
+# Drop the individual columns
+hotel_bookings <- hotel_bookings %>%
+  select(-c(arrival_date_year, arrival_date_month, arrival_date_day_of_month))
+
+
+summary(hotel_bookings)
+
+
+# Identify outliers in lead_time
+lead_time_outliers <- boxplot.stats(hotel_bookings$lead_time)$out
+print(lead_time_outliers)
+upper_whisker <- boxplot.stats(hotel_bookings$lead_time)$stats[5]
+hotel_bookings$lead_time[hotel_bookings$lead_time > upper_whisker] <- upper_whisker
+
+# Identify outliers in stays_in_weekend_nights and stays_in_week_nights
+weekend_nights_outliers <- boxplot.stats(hotel_bookings$stays_in_weekend_nights)$out
+week_nights_outliers <- boxplot.stats(hotel_bookings$stays_in_week_nights)$out
+print(week_nights_outliers)
+print(weekend_nights_outliers)
+# Replace outliers with a reasonable value (e.g., the upper bound of a whisker)
+upper_whisker_weekend <- boxplot.stats(hotel_bookings$stays_in_weekend_nights)$stats[5]
+upper_whisker_week <- boxplot.stats(hotel_bookings$stays_in_week_nights)$stats[5]
+
+hotel_bookings$stays_in_weekend_nights[hotel_bookings$stays_in_weekend_nights > upper_whisker_weekend] <- upper_whisker_weekend
+hotel_bookings$stays_in_week_nights[hotel_bookings$stays_in_week_nights > upper_whisker_week] <- upper_whisker_week
+
+# Identify outliers in adults, children, babies
+adults_outliers <- boxplot.stats(hotel_bookings$adults)$out
+upper_whisker_adults <- boxplot.stats(hotel_bookings$adults)$stats[5]
+hotel_bookings$adults[hotel_bookings$adults > upper_whisker_adults] <- upper_whisker_adults
+babies_outliers <- boxplot.stats(hotel_bookings$babies)$out
+print(babies_outliers)
+upper_whisker_babies <- boxplot.stats(hotel_bookings$babies)$stats[5]
+hotel_bookings$babies[hotel_bookings$babies %in% c(9, 10)] <- upper_whisker_babies
+
+# Identify outliers in children
+children_outliers <- boxplot.stats(hotel_bookings$children)$out
+upper_whisker_children <- boxplot.stats(hotel_bookings$children)$stats[5]
+hotel_bookings$children[hotel_bookings$children == 10] <- upper_whisker_children
+print(children_outliers)
+
+# Find the minimum ADR value
+min_adr <- min(hotel_bookings$adr)
+
+# Find the median ADR value
+median_adr <- median(hotel_bookings$adr, na.rm = TRUE)
+
+# Replace the minimum ADR value with the median ADR value
+hotel_bookings$adr[hotel_bookings$adr == min_adr] <- median_adr
+
+#visualization#
+
+# Bar chart for hotel distribution
+ggplot(hotel_bookings, aes(x = hotel, fill = hotel)) +
+  geom_bar() +
+  labs(title = "Distribution of Hotel Types", x = "Hotel Type", y = "Count") +
+  theme_minimal()
+
+# Bar plot for market segmentation
+ggplot(hotel_bookings, aes(x = market_segment, fill = hotel)) +
+  geom_bar(position = "dodge", alpha = 0.7) +
+  labs(title = "Distribution of Bookings by Market Segment", x = "Market Segment", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Stacked bar plot for reservation status
+ggplot(hotel_bookings, aes(x = reservation_status, fill = hotel)) +
+  geom_bar(position = "stack", alpha = 0.7) +
+  labs(title = "Proportion of Reservation Status", x = "Reservation Status", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Convert 'arrival_date' to Date format
+hotel_bookings$arrival_date <- as.Date(hotel_bookings$arrival_date)
+
+# Count the number of bookings for each date
+booking_counts <- hotel_bookings %>%
+  group_by(arrival_date) %>%
+  summarise(booking_count = n())
+
+# Line Chart for Number of Bookings Over Time
+line_chart_bookings_over_time <- ggplot(booking_counts, aes(x = arrival_date, y = booking_count)) +
+  geom_line() +
+  labs(title = "Line Chart: Number of Bookings Over Time",
+       x = "Arrival Date",
+       y = "Number of Bookings")
+
+print(line_chart_bookings_over_time)
+
+##Modelling
+
+# Convert 'is_canceled' to a factor
+hotel_bookings$is_canceled <- as.factor(hotel_bookings$is_canceled)
+
+# Split the data into training and testing sets
+set.seed(123)
+train_indices <- createDataPartition(hotel_bookings$is_canceled, p = 0.8, list = FALSE)
+train_data <- hotel_bookings[train_indices, ]
+test_data <- hotel_bookings[-train_indices, ]
+
+# Create a random forest model
+# Impute missing values with the median for numeric variables
+train_data <- train_data %>%
+  mutate_if(is.numeric, funs(ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+# Create a random forest model
+rf_model <- randomForest(is_canceled ~ ., data = train_data, ntree = 100)
+
+# Make predictions on the test set
+predictions <- predict(rf_model, newdata = test_data)
+
+# Evaluate the model
+confusion_matrix <- table(predictions, test_data$is_canceled)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", round(accuracy, 4)))
+
+# You can also check other metrics like precision, recall, and F1-score if needed
+precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+print(paste("Precision:", round(precision, 4)))
+print(paste("Recall:", round(recall, 4)))
+print(paste("F1 Score:", round(f1_score, 4)))
+
+# Display summary of the cleaned dataset
+summary(hotel_bookings)
